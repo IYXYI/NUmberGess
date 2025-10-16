@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Guess the Number Challenge</title>
+  <link rel="stylesheet" href="/assets/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Guess the Number</h1>
+    <p class="lead">Guess a number between 1 and 100. A new number is generated daily.</p>
+
+    <div class="game">
+      <label for="guess">Your guess</label>
+      <input id="guess" type="number" min="1" max="100" />
+      <button id="submit">Check locally</button>
+      <button id="record">Record guess (Open issue)</button>
+
+      <div id="hint" class="hint" aria-live="polite"></div>
+      <div class="note">Note: Recording a guess opens a prefilled GitHub issue. The Actions workflow enforces a limit of 3 attempts per player per day. If you want a quick local check, use "Check locally".</div>
+    </div>
+
+    <section class="leaderboard">
+      <h2>Leaderboard (per-day)</h2>
+      <div class="timeline-toggle">
+        <button id="btn-today" class="active">Today</button>
+        <button id="btn-global">Global timeline</button>
+      </div>
+
+      <div id="today" class="day-board">
+        <h3>Today</h3>
+        <ul id="leaders-today"></ul>
+      </div>
+
+      <div id="recent" class="day-board hidden">
+        <h3>Global timeline</h3>
+        <div id="recent-days"></div>
+      </div>
+    </section>
+
+    <footer>
+      <p>Play by opening an issue with your guess to record a win (optional).</p>
+    </footer>
+  </main>
+
+  <script>
+    async function fetchJSON(path) {
+      const res = await fetch(path, {cache: 'no-store'});
+      if (!res.ok) throw new Error('Failed to fetch ' + path);
+      return res.json();
+    }
+
+    async function init() {
+      const hintEl = document.getElementById('hint');
+      const leadersEl = document.getElementById('leaders');
+      let secret = null;
+
+      try {
+        const s = await fetchJSON('/secret-number.json');
+        secret = Number(s.number);
+      } catch (e) {
+        hintEl.textContent = 'Unable to load game data.';
+        hintEl.classList.add('error');
+        console.error(e);
+      }
+
+      try {
+        const lb = await fetchJSON('/leaderboard.json');
+        const winners = lb.winners || [];
+
+        // Group winners by day
+        const byDay = winners.reduce((acc, w) => {
+          const day = w.day || new Date(w.time).toISOString().slice(0,10);
+          acc[day] = acc[day] || [];
+          acc[day].push(w);
+          return acc;
+        }, {});
+
+        const todayKey = new Date().toISOString().slice(0,10);
+        const todayList = document.getElementById('leaders-today');
+        const recentDaysDiv = document.getElementById('recent-days');
+        todayList.innerHTML = '';
+        recentDaysDiv.innerHTML = '';
+
+        // Render today's winners first
+        (byDay[todayKey] || []).forEach((w, idx) => {
+          const li = document.createElement('li');
+          const rank = document.createElement('span');
+          rank.className = 'rank';
+          rank.textContent = idx + 1;
+          if (idx === 0) rank.classList.add('gold');
+          else if (idx === 1) rank.classList.add('silver');
+          else if (idx === 2) rank.classList.add('bronze');
+
+          const txt = document.createElement('span');
+          txt.className = 'player-text';
+          txt.textContent = `${w.player} — ${new Date(w.time).toLocaleTimeString()}`;
+
+          li.appendChild(rank);
+          li.appendChild(txt);
+          todayList.appendChild(li);
+        });
+
+        // Render up to 5 recent days (excluding today)
+        const days = Object.keys(byDay).sort((a,b) => b.localeCompare(a)).filter(d => d !== todayKey).slice(0,5);
+        days.forEach(d => {
+          const box = document.createElement('div');
+          box.className = 'day';
+          const h = document.createElement('h4');
+          h.textContent = d;
+          box.appendChild(h);
+          const ul = document.createElement('ul');
+          byDay[d].forEach(w => {
+            const li = document.createElement('li');
+            // show numeric rank based on order
+            const idx = byDay[d].indexOf(w);
+            const rank = document.createElement('span');
+            rank.className = 'rank small';
+            rank.textContent = idx + 1;
+            if (idx === 0) rank.classList.add('gold');
+            else if (idx === 1) rank.classList.add('silver');
+            else if (idx === 2) rank.classList.add('bronze');
+            li.appendChild(rank);
+            const txt = document.createElement('span');
+            txt.className = 'player-text';
+            txt.textContent = `${w.player} — ${new Date(w.time).toLocaleString()}`;
+            li.appendChild(txt);
+            ul.appendChild(li);
+          });
+          box.appendChild(ul);
+          recentDaysDiv.appendChild(box);
+        });
+        // wire up toggle buttons
+        document.getElementById('btn-today').addEventListener('click', () => {
+          document.getElementById('today').classList.remove('hidden');
+          document.getElementById('recent').classList.add('hidden');
+          document.getElementById('btn-today').classList.add('active');
+          document.getElementById('btn-global').classList.remove('active');
+        });
+        document.getElementById('btn-global').addEventListener('click', () => {
+          document.getElementById('today').classList.add('hidden');
+          document.getElementById('recent').classList.remove('hidden');
+          document.getElementById('btn-global').classList.add('active');
+          document.getElementById('btn-today').classList.remove('active');
+        });
+      } catch (e) {
+        console.warn('No leaderboard available', e);
+      }
+
+      document.getElementById('submit').addEventListener('click', () => {
+        const v = Number(document.getElementById('guess').value);
+        if (!v || v < 1 || v > 100) {
+          hintEl.textContent = 'Enter a number between 1 and 100.';
+          hintEl.classList.remove('win');
+          hintEl.classList.add('error');
+          return;
+        }
+        if (secret === null) {
+          hintEl.textContent = 'Secret not loaded.';
+          return;
+        }
+        if (v === secret) {
+          hintEl.textContent = '🎉 Correct! You win — open an issue to record your victory.';
+          hintEl.classList.remove('error');
+          hintEl.classList.add('win');
+        } else if (v < secret) {
+          hintEl.textContent = '❄️ Too low!';
+          hintEl.classList.remove('win');
+          hintEl.classList.add('low');
+        } else {
+          hintEl.textContent = '🔥 Too high!';
+          hintEl.classList.remove('win');
+          hintEl.classList.add('high');
+        }
+      });
+
+      document.getElementById('record').addEventListener('click', () => {
+        const v = Number(document.getElementById('guess').value);
+        const hintEl = document.getElementById('hint');
+        if (!v || v < 1 || v > 100) {
+          hintEl.textContent = 'Enter a number between 1 and 100.';
+          hintEl.classList.add('error');
+          return;
+        }
+        // Prefill a new issue with the guess. Users must be signed into GitHub.
+        const title = encodeURIComponent(`Guess: ${v}`);
+        const body = encodeURIComponent(`I guess ${v} \n\nFrontend: GitHub Pages`);
+        const url = `https://github.com/${location.host.split('.')[0]}/issues/new?title=${title}&body=${body}`;
+        // open in new tab
+        window.open(url, '_blank');
+      });
+    }
+
+    window.addEventListener('load', init);
+  </script>
+</body>
+</html>

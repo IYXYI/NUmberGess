@@ -1,0 +1,38 @@
+name: Daily Secret Number
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # every day at 00:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Generate random number
+        id: gen
+        run: |
+          NUM=$(( ( RANDOM % 100 ) + 1 ))
+          DATE=$(date -u +%F)
+          echo "number=$NUM" >> $GITHUB_OUTPUT
+          echo "date=$DATE" >> $GITHUB_OUTPUT
+
+      - name: Create secret JSON
+        run: |
+          cat > secret-number.json <<EOF
+          { "number": ${{ steps.gen.outputs.number }}, "date": "${{ steps.gen.outputs.date }}" }
+          EOF
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add secret-number.json
+          git commit -m "Daily secret number for ${{ steps.gen.outputs.date }}" || echo "no changes"
+          git push

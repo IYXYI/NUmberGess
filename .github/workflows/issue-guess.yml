@@ -1,0 +1,138 @@
+name: Issue Guess Handler (Rate-limited)
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  handle_guess:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read issue payload
+        id: payload
+        uses: actions/github-script@v7
+        with:
+          script: |
+            return { body: context.payload.issue.body || '', user: context.payload.issue.user.login, number: context.payload.issue.number };
+
+      - name: Extract number
+        id: extract
+        run: |
+          BODY='${{ steps.payload.outputs.result.body }}'
+          NUM=$(echo "$BODY" | grep -oE '[0-9]+' | head -n1 || true)
+          echo "NUM=$NUM" >> $GITHUB_OUTPUT
+
+      - name: Load today's date
+        id: date
+        run: |
+          DATE=$(date -u +%F)
+          echo "DATE=$DATE" >> $GITHUB_OUTPUT
+
+      - name: Validate guess present
+        if: ${{ steps.extract.outputs.NUM == '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number, body: 'Please include a number (1-100) in your issue body.' });
+
+      - name: Load JSON files
+        if: ${{ steps.extract.outputs.NUM != '' }}
+        run: |
+          jq . secret-number.json > /dev/null
+          jq . leaderboard.json > /dev/null || echo '{"winners": []}' > leaderboard.json
+          jq . daily_guesses.json > /dev/null || echo '{"days":{}}' > daily_guesses.json
+
+      - name: Check rate limit and evaluate
+        if: ${{ steps.extract.outputs.NUM != '' }}
+        id: check
+        run: |
+          NUM=${{ steps.extract.outputs.NUM }}
+          USER='${{ steps.payload.outputs.result.user }}'
+          ISSUE_NUM='${{ steps.payload.outputs.result.number }}'
+          DATE='${{ steps.date.outputs.DATE }}'
+
+          SECRET=$(jq -r '.number' secret-number.json)
+
+          # Ensure structure for today
+          jq --arg d "$DATE" '.days[$d] //= {attempts: {}}' daily_guesses.json > daily.tmp.json && mv daily.tmp.json daily_guesses.json
+
+          # Get attempts by user
+          ATTEMPTS=$(jq -r --arg d "$DATE" --arg u "$USER" '.days[$d].attempts[$u] // 0' daily_guesses.json)
+
+          if [ "$ATTEMPTS" -ge 3 ]; then
+            RESULT="rate-limited"
+            echo "RESULT=$RESULT" >> $GITHUB_OUTPUT
+            echo "ATTEMPTS=$ATTEMPTS" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # increment attempts
+          jq --arg d "$DATE" --arg u "$USER" '.days[$d].attempts[$u] = ((.days[$d].attempts[$u]) // 0) + 1' daily_guesses.json > daily.tmp.json && mv daily.tmp.json daily_guesses.json
+
+          # Compare
+          if [ "$NUM" -eq "$SECRET" ]; then
+            RESULT="correct"
+          elif [ "$NUM" -lt "$SECRET" ]; then
+            RESULT="low"
+          else
+            RESULT="high"
+          fi
+
+          echo "RESULT=$RESULT" >> $GITHUB_OUTPUT
+          echo "NUM=$NUM" >> $GITHUB_OUTPUT
+          echo "USER=$USER" >> $GITHUB_OUTPUT
+          echo "DATE=$DATE" >> $GITHUB_OUTPUT
+
+      - name: Commit daily guesses increment
+        if: ${{ steps.extract.outputs.NUM != '' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add daily_guesses.json
+          git commit -m "Update daily attempts for ${{ steps.check.outputs.DATE }}" || echo "no changes"
+          git push
+
+      - name: Respond to issue
+        if: ${{ steps.extract.outputs.NUM != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const res = '${{ steps.check.outputs.RESULT }}';
+            const attempts = (() => {
+              const data = require('fs').readFileSync('daily_guesses.json','utf8');
+              const json = JSON.parse(data);
+              const d = '${{ steps.check.outputs.DATE }}';
+              const u = '${{ steps.check.outputs.USER }}';
+              if (json.days && json.days[d] && json.days[d].attempts && json.days[d].attempts[u] !== undefined) return json.days[d].attempts[u];
+              return 0;
+            })();
+            let body = '';
+            if (res === 'rate-limited') body = `You've reached the daily limit of 3 attempts (today: ${attempts}). Come back tomorrow!`;
+            else if (res === 'low') body = `❄️ Too low! Attempts used today: ${attempts}/3`;
+            else if (res === 'high') body = `🔥 Too high! Attempts used today: ${attempts}/3`;
+            else if (res === 'correct') body = `🎉 Correct! You win — recording your name on the leaderboard.`;
+            await github.rest.issues.createComment({ owner: context.repo.owner, repo: context.repo.repo, issue_number: issue.number, body });
+
+      - name: Update leaderboard if correct
+        if: ${{ steps.check.outputs.RESULT == 'correct' }}
+        run: |
+          USER='${{ steps.check.outputs.USER }}'
+          DATE='${{ steps.check.outputs.DATE }}'
+          TIMESTAMP=$(date -u --iso-8601=seconds)
+          # Append new winner and sort winners by day then time (earliest first)
+          jq --arg user "$USER" --arg time "$TIMESTAMP" --arg day "$DATE" '.winners = (.winners + [ { player: $user, time: $time, day: $day } ]) | (.winners |= sort_by(.day, .time))' leaderboard.json > leaderboard.new.json || true
+          mv leaderboard.new.json leaderboard.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add leaderboard.json
+          git commit -m "Add winner ${USER} for ${DATE}" || echo "no changes"
+          git push
