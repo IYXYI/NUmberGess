@@ -1,0 +1,44 @@
+name: CI - Validate JSON/YAML
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install yamllint and jq
+        run: |
+          python -m pip install --upgrade pip
+          pip install yamllint
+          sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Validate JSON files
+        run: |
+          set -e
+          for j in secret-number.json leaderboard.json daily_guesses.json; do
+            if [ -f "$j" ]; then
+              jq . "$j" >/dev/null || { echo "Invalid JSON: $j"; exit 1; }
+              echo "OK JSON $j"
+            else
+              echo "MISSING $j"; exit 1
+            fi
+          done
+
+      - name: Validate YAML workflows
+        run: |
+          set -e
+          yamllint -c /dev/null .github/workflows || true
+          for y in .github/workflows/*.yml; do
+            python3 -c "import yaml,sys; f=sys.argv[1]; yaml.safe_load(open(f)); print('OK', f)" "$y" || { echo "Invalid YAML: $y"; exit 1; }
+          done
