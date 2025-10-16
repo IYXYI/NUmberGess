@@ -3,6 +3,7 @@ name: Build and deploy GitHub Pages
 on:
   push:
     branches: [ main ]
+  workflow_dispatch: {}
 
 permissions:
   pages: write
@@ -26,3 +27,10 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v1
+
+      - name: Print expected Pages URL
+        run: |
+          REPO="${{ github.repository }}"
+          OWNER=$(echo "$REPO" | cut -d'/' -f1)
+          NAME=$(echo "$REPO" | cut -d'/' -f2)
+          echo "Pages should be available at: https://${OWNER}.github.io/${NAME}/ (or check Settings → Pages for exact URL)"

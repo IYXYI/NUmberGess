@@ -39,3 +39,9 @@ Per-day scoreboard and rate limiting
 ---
 
 Files created by the automation in this repo are a baseline. Inspect and adjust the workflow permissions before enabling in a real repository.
+
+Getting the GitHub Pages site live
+
+- Make sure Pages are enabled in the repository Settings → Pages. Choose branch: `main`, folder: `/ (root)`.
+- After enabling, you can either push to `main` (which triggers the Pages deploy workflow) or run the `Build and deploy GitHub Pages` workflow manually via Actions → `Build and deploy GitHub Pages` → Run workflow.
+- The workflow will print the expected Pages URL as a run log. The default URL is: `https://<owner>.github.io/<repo>/`. If your repo is an org or user page, the path may differ.
