@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Guess the Number Challenge</title>
-  <link rel="stylesheet" href="/assets/style.css" />
+  <link rel="stylesheet" href="assets/style.css" />
 </head>
 <body>
   <main class="container">
@@ -57,7 +57,7 @@
       let secret = null;
 
       try {
-        const s = await fetchJSON('/secret-number.json');
+        const s = await fetchJSON('secret-number.json');
         secret = Number(s.number);
       } catch (e) {
         hintEl.textContent = 'Unable to load game data.';
@@ -66,7 +66,7 @@
       }
 
       try {
-        const lb = await fetchJSON('/leaderboard.json');
+        const lb = await fetchJSON('leaderboard.json');
         const winners = lb.winners || [];
 
         // Group winners by day
@@ -186,7 +186,8 @@
         // Prefill a new issue with the guess. Users must be signed into GitHub.
         const title = encodeURIComponent(`Guess: ${v}`);
         const body = encodeURIComponent(`I guess ${v} \n\nFrontend: GitHub Pages`);
-        const url = `https://github.com/${location.host.split('.')[0]}/issues/new?title=${title}&body=${body}`;
+        // Open issue for the specific repo (hardcoded to this repo)
+        const url = `https://github.com/IYXYI/NUmberGess/issues/new?title=${title}&body=${body}`;
         // open in new tab
         window.open(url, '_blank');
       });
